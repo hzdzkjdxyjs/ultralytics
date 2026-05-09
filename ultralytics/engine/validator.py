@@ -173,9 +173,23 @@ class BaseValidator:
                     model.set_head_attr(max_det=self.args.max_det, agnostic_nms=self.args.agnostic_nms)
             with torch_distributed_zero_first(LOCAL_RANK):
                 self.args.data = convert_ndjson_to_yolo_if_needed(self.args.data)
+            if RANK == -1:
+                eval_device = select_device(self.args.device)
+            else:
+                device_arg = str(self.args.device or "").lower()
+                if device_arg.startswith("xpu"):
+                    if not hasattr(torch, "xpu") or not torch.xpu.is_available():
+                        raise RuntimeError("Requested XPU device but torch.xpu is not available.")
+                    eval_device = torch.device("xpu", RANK)
+                elif device_arg.startswith("cuda") or device_arg.isdigit() or device_arg == "":
+                    if not torch.cuda.is_available():
+                        raise RuntimeError("Requested CUDA device but torch.cuda is not available.")
+                    eval_device = torch.device("cuda", RANK)
+                else:
+                    eval_device = torch.device("cpu")
             model = AutoBackend(
                 model=model or self.args.model,
-                device=select_device(self.args.device) if RANK == -1 else torch.device("cuda", RANK),
+                device=eval_device,
                 dnn=self.args.dnn,
                 data=self.args.data,
                 fp16=self.args.half,
@@ -259,7 +273,12 @@ class BaseValidator:
             # Reduce loss across all GPUs
             loss = self.loss.clone().detach()
             if trainer.world_size > 1:
-                dist.reduce(loss, dst=0, op=dist.ReduceOp.AVG)
+                if trainer.device.type == "xpu":
+                    dist.reduce(loss, dst=0, op=dist.ReduceOp.SUM)
+                    if RANK == 0:
+                        loss /= trainer.world_size
+                else:
+                    dist.reduce(loss, dst=0, op=dist.ReduceOp.AVG)
             if RANK > 0:
                 return
             results = {**stats, **trainer.label_loss_items(loss.cpu() / len(self.dataloader), prefix="val")}
