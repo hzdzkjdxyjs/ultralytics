@@ -45,9 +45,9 @@ class BOTrack(STrack):
 
     Examples:
         Create a BOTrack instance and update its features
-        >>> bo_track = BOTrack(tlwh=[100, 50, 80, 40], score=0.9, cls=1, feat=np.random.rand(128))
+        >>> bo_track = BOTrack(xywh=np.array([100, 50, 80, 40, 0]), score=0.9, cls=1, feat=np.random.rand(128))
         >>> bo_track.predict()
-        >>> new_track = BOTrack(tlwh=[110, 60, 80, 40], score=0.85, cls=1, feat=np.random.rand(128))
+        >>> new_track = BOTrack(xywh=np.array([110, 60, 80, 40, 0]), score=0.85, cls=1, feat=np.random.rand(128))
         >>> bo_track.update(new_track, frame_id=2)
     """
 
@@ -59,7 +59,8 @@ class BOTrack(STrack):
         """Initialize a BOTrack object with temporal parameters, such as feature history, alpha, and current features.
 
         Args:
-            xywh (np.ndarray): Bounding box coordinates in xywh format (center x, center y, width, height).
+            xywh (np.ndarray): Bounding box in `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)` format, where (x, y) is
+                the center, (w, h) are width and height, and `idx` is the detection index.
             score (float): Confidence score of the detection.
             cls (int): Class ID of the detected object.
             feat (np.ndarray, optional): Feature vector associated with the detection.
@@ -71,7 +72,7 @@ class BOTrack(STrack):
         self.curr_feat = None
         if feat is not None:
             self.update_features(feat)
-        self.features = deque([], maxlen=feat_history)
+        self.features = deque(maxlen=feat_history)
         self.alpha = 0.9
 
     def update_features(self, feat: np.ndarray) -> None:
@@ -155,15 +156,15 @@ class BOTSORT(BYTETracker):
 
     Methods:
         get_kalmanfilter: Return an instance of KalmanFilterXYWH for object tracking.
-        init_track: Initialize track with detections, scores, and classes.
+        init_track: Initialize track with detection results and optional image for ReID.
         get_dists: Get distances between tracks and detections using IoU and (optionally) ReID.
-        multi_predict: Predict and track multiple objects with a YOLO model.
+        multi_predict: Predict the mean and covariance of multiple object tracks using a shared Kalman filter.
         reset: Reset the BOTSORT tracker to its initial state.
 
     Examples:
         Initialize BOTSORT and process detections
         >>> bot_sort = BOTSORT(args, frame_rate=30)
-        >>> bot_sort.init_track(dets, scores, cls, img)
+        >>> bot_sort.init_track(results, img)
         >>> bot_sort.multi_predict(tracks)
 
     Notes:
